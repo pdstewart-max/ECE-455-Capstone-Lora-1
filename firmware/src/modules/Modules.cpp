@@ -102,6 +102,8 @@
 #endif
 #endif
 
+#include "modules/PocTimeModule.h"
+
 #if !MESHTASTIC_EXCLUDE_EXTERNALNOTIFICATION
 #include "modules/ExternalNotificationModule.h"
 #endif
@@ -134,6 +136,8 @@ void setupModules()
         buzzerFeedbackThread = new BuzzerFeedbackThread();
     }
 #endif
+pocTimeModule = new PocTimeModule();
+
     statusLEDModule = new StatusLEDModule();
 #if !MESHTASTIC_EXCLUDE_REPLYBOT
     new ReplyBotModule();
