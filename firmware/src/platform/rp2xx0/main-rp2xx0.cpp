@@ -121,6 +121,19 @@ bool getDeviceId(uint8_t *deviceId)
 
 void rp2040Setup()
 {
+    #ifdef RAK11310
+    // RAK12501 on the WisBlock base board is powered by the 3V3_S rail.
+    // The rail is disabled at reset and must be power-cycled before UART1
+    // can receive NMEA data.
+    pinMode(WB_IO2, OUTPUT);
+    digitalWrite(WB_IO2, LOW);
+    LOG_INFO("RAK12501 3V3_S rail: power OFF on WB_IO2");
+    delay(1000);
+    digitalWrite(WB_IO2, HIGH);
+    delay(1000);
+    LOG_INFO("RAK12501 3V3_S rail enabled on WB_IO2; waiting for GPS UART1 traffic");
+#endif
+
     if (watchdog_caused_reboot()) {
         LOG_WARN("Rebooted by watchdog");
     }

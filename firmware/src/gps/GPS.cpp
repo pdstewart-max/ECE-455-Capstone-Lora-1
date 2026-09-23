@@ -1957,12 +1957,16 @@ GnssModel_t GPS::getProbeResponse(unsigned long timeout, const std::vector<ChipI
                 }
             }
             if (responseLen >= 2 && response[responseLen - 2] == '\r' && response[responseLen - 1] == '\n') {
+                LOG_INFO("GPS probe raw: %s", response.get());
                 LOG_DEBUG_GPS("%s", response.get());
                 // Reset the response buffer for the next potential message
                 responseLen = 0;
                 response[0] = '\0';
             }
         }
+    }
+    if (responseLen > 0) {
+        LOG_INFO("GPS probe raw tail: %s", response.get());
     }
     LOG_DEBUG_GPS("%s", response.get());
     return GNSS_MODEL_UNKNOWN; // Return unknown on timeout
@@ -2157,6 +2161,8 @@ The Unix epoch (or Unix time or POSIX time or Unix timestamp) is the number of s
  */
 bool GPS::lookForLocation()
 {
+
+
     // By default, TinyGPS++ does not parse GPGSA lines, which give us
     //   the 2D/3D fixType (see NMEAGPS.h)
     // At a minimum, use the fixQuality indicator in GPGGA (FIXME?)
@@ -2210,6 +2216,17 @@ bool GPS::lookForLocation()
 
     // We know the solution is fresh and valid, so just read the data
     auto loc = reader.location.value();
+
+if (reader.location.isValid()) {
+    LOG_INFO("GPS fix: lat=%f lon=%f sats=%d",
+             reader.location.lat(),
+             reader.location.lng(),
+             reader.satellites.isValid() ? reader.satellites.value() : 0);
+} else {
+    LOG_INFO("GPS search: sats=%d",
+             reader.satellites.isValid() ? reader.satellites.value() : 0);
+}
+
 
     // Bail out EARLY to avoid overwriting previous good data (like #857)
     if (toDegInt(loc.lat) > 900000000) {

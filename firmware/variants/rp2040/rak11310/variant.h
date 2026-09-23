@@ -25,9 +25,14 @@
 #define DETECTION_SENSOR_EN 28
 
 // RAK12501 / WisBlock GNSS module on the board's UART1 (GPIO5 RX, GPIO4 TX).
+#define PIN_GPS_EN WB_IO2
+#define GPS_EN_ACTIVE HIGH
 #define HAS_GPS 1
 #define GPS_RX_PIN PIN_SERIAL1_RX
 #define GPS_TX_PIN PIN_SERIAL1_TX
+// Enable GNSS bring-up logs while validating the RAK12501 integration.
+#define GPS_DEBUG 1
+
 
 #define USE_SX1262
 

@@ -16,7 +16,9 @@ PocTimeModule::PocTimeModule()
 int32_t PocTimeModule::runOnce()
 {
     char timeStr[32] = "RTC Syncing...";
-    const uint32_t nowSecs = getTime(true);
+    // getTime() returns time in seconds since 1970
+    // getTime(true) returns UTC time, getTime(false) returns local time
+    const uint32_t nowSecs = getTime(false);
 
     if (nowSecs != 0) {
         const time_t now = static_cast<time_t>(nowSecs);
