@@ -41,7 +41,7 @@ int32_t PocTimeModule::runOnce()
         }
     }
 
-    char envStr[192] = "ENV: unavailable";
+    char envStr[192] = "ENV: Already in use";
 #if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR
     if (nodeDB != nullptr) {
         meshtastic_EnvironmentMetrics env = meshtastic_EnvironmentMetrics_init_zero;
