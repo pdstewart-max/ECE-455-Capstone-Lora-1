@@ -24,8 +24,11 @@
 
 #define DETECTION_SENSOR_EN 28
 
-// This board is being used as a minimal sensor logger; GPS and Ethernet are not part of the
-// required hardware stack for the current deployment and add unnecessary code and compile time.
+#define HAS_GPS 1
+#define GPS_RX_PIN PIN_SERIAL1_RX
+#define GPS_TX_PIN PIN_SERIAL1_TX
+#define PIN_GPS_EN WB_IO2
+
 #define USE_SX1262
 
 #undef LORA_SCK
