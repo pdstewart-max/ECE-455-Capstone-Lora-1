@@ -30,9 +30,11 @@ static const uint8_t A3 = PIN_A3;
 
 // Serial
 // The WisBlock connector exposes UART1 on GPIO4 (TX) and GPIO5 (RX) on the RAK11310.
+#define __SERIAL1_DEVICE uart1
 #define PIN_SERIAL1_TX (4ul)
 #define PIN_SERIAL1_RX (5ul)
 
+#define __SERIAL2_DEVICE uart0
 #define PIN_SERIAL2_TX (0ul)
 #define PIN_SERIAL2_RX (1ul)
 

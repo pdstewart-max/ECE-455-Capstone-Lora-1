@@ -25,6 +25,7 @@
 #define DETECTION_SENSOR_EN 28
 
 #define HAS_GPS 1
+#define GPS_SERIAL_PORT Serial1
 #define GPS_RX_PIN PIN_SERIAL1_RX
 #define GPS_TX_PIN PIN_SERIAL1_TX
 #define PIN_GPS_EN WB_IO2

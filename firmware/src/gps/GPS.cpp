@@ -820,7 +820,11 @@ bool GPS::setup()
 {
     if (!didSerialInit) {
         int msglen = 0;
+    #if defined(RAK11310)
+        if (gnssModel == GNSS_MODEL_UNKNOWN) {
+    #else
         if (tx_gpio && gnssModel == GNSS_MODEL_UNKNOWN) {
+    #endif
             if (!hasProbeCache && !triedProbeCache) {
                 (void)loadProbeCache();
             }
@@ -1978,6 +1982,10 @@ std::unique_ptr<GPS> GPS::createGps()
     int8_t _tx_gpio = config.position.tx_gpio;
     int8_t _en_gpio = config.position.gps_en_gpio;
 
+#if defined(RAK11310)
+    _rx_gpio = GPS_RX_PIN;
+    _tx_gpio = GPS_TX_PIN;
+#else
 #if defined(GPS_RX_PIN)
     if (!_rx_gpio)
         _rx_gpio = GPS_RX_PIN;
@@ -1989,6 +1997,7 @@ std::unique_ptr<GPS> GPS::createGps()
 #if defined(PIN_GPS_EN)
     if (!_en_gpio)
         _en_gpio = PIN_GPS_EN;
+#endif
 #endif
 #ifdef ARCH_PORTDUINO
     if (portduino_config.has_gps) {

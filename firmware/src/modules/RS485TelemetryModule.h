@@ -3,22 +3,26 @@
 #include <Arduino.h>
 
 #include "concurrency/OSThread.h"
-#include "mesh/SinglePortModule.h"
+#include "mesh/ProtobufModule.h"
+#include "mesh/generated/meshtastic/telemetry.pb.h"
 
-class RS485TelemetryModule : public SinglePortModule, public concurrency::OSThread {
-public:
-	RS485TelemetryModule();
+#if defined(RAK11310)
+class RS485TelemetryModule : private concurrency::OSThread, public ProtobufModule<meshtastic_Telemetry> {
+	public:
+		RS485TelemetryModule();
 
-protected:
-	int32_t runOnce() override;
+	protected:
+		bool handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_Telemetry *telemetry) override;
+		int32_t runOnce() override;
 
-private:
-	uint16_t calculateCRC16(const uint8_t *buffer, uint16_t length);
-	bool sendModbusQuery(uint8_t slaveId, uint8_t funcCode, uint16_t startReg, uint16_t regCount, uint8_t *responseBuf,
-						 size_t &responseLen);
-	float bytesToFloat(const uint8_t *bytes);
-	void readYosemitechSonde();
-	void readDFRobotWeather();
+	private:
+		bool readRegisters(uint8_t slaveId, uint16_t startRegister, uint16_t count, uint16_t *registers);
+		bool readY4000(meshtastic_SoilWaterMetrics &waterMetrics, float &temperature);
+		bool readSEN0657(meshtastic_EnvironmentMetrics &weatherMetrics, uint16_t &rainfallTenthsMm);
+		bool sendTelemetry(const meshtastic_Telemetry &telemetry);
+		static uint16_t calculateCRC16(const uint8_t *buffer, size_t length);
+		static float decodeY4000Float(const uint16_t *registers);
 };
 
 extern RS485TelemetryModule *rs485TelemetryModule;
+#endif
