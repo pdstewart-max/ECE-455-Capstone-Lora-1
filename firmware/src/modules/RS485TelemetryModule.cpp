@@ -243,6 +243,7 @@ bool RS485TelemetryModule::readSEN0657(meshtastic_EnvironmentMetrics &weatherMet
     return true;
 }
 
+// Send telemetry data to the mesh network
 bool RS485TelemetryModule::sendTelemetry(const meshtastic_Telemetry &telemetry)
 {
     meshtastic_MeshPacket *packet = allocDataProtobuf(telemetry);
@@ -256,6 +257,7 @@ bool RS485TelemetryModule::sendTelemetry(const meshtastic_Telemetry &telemetry)
     return true;
 }
 
+// Handle received telemetry messages (not used in this module)
 bool RS485TelemetryModule::handleReceivedProtobuf(const meshtastic_MeshPacket &, meshtastic_Telemetry *)
 {
     return false;
