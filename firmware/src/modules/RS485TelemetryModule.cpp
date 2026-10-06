@@ -41,7 +41,7 @@ RS485TelemetryModule::RS485TelemetryModule()
     RS485.begin(RS485_BAUD);
     RS485.receive();
 
-    // LOG_INFO("RS485 transport=ArduinoRS485 UART=Serial1 TX=0 RX=1 DE=6 RE=-1");
+    LOG_INFO("RS485 transport=ArduinoRS485 UART=Serial1 TX=0 RX=1 DE=6 RE=-1");
     setIntervalFromNow(POLL_INTERVAL_MS);
 }
 
@@ -83,7 +83,7 @@ bool RS485TelemetryModule::readRegisters(uint8_t slaveId, uint16_t startRegister
     request[6] = static_cast<uint8_t>(crc);
     request[7] = static_cast<uint8_t>(crc >> 8);
 
-    // LOG_DEBUG("Modbus TX id=0x%x reg=0x%04x count=%u", static_cast<unsigned>(slaveId), static_cast<unsigned>(startRegister), static_cast<unsigned>(count));
+    LOG_DEBUG("Modbus TX id=0x%x reg=0x%04x count=%u", static_cast<unsigned>(slaveId), static_cast<unsigned>(startRegister), static_cast<unsigned>(count));
 
     // 3. Transmit request
     RS485.beginTransmission();
@@ -146,26 +146,26 @@ bool RS485TelemetryModule::readRegisters(uint8_t slaveId, uint16_t startRegister
     }
 
     if (responseLength == 0) {
-        // LOG_DEBUG("Modbus timeout id=0x%x reg=0x%04x wait=%u", static_cast<unsigned>(slaveId), static_cast<unsigned>(startRegister), static_cast<unsigned>(millis() - startedAt));
+        LOG_DEBUG("Modbus timeout id=0x%x reg=0x%04x wait=%u", static_cast<unsigned>(slaveId), static_cast<unsigned>(startRegister), static_cast<unsigned>(millis() - startedAt));
         return false;
     }
     if (responseLength < 3) {
-        // LOG_DEBUG("Modbus partial header id=0x%x len=%u", static_cast<unsigned>(slaveId), static_cast<unsigned>(responseLength));
+        LOG_DEBUG("Modbus partial header id=0x%x len=%u", static_cast<unsigned>(slaveId), static_cast<unsigned>(responseLength));
         return false;
     }
     if (frameLength == 5 && responseLength == frameLength) {
-        // LOG_WARN("Modbus exception id=0x%x code=0x%x", static_cast<unsigned>(response[0]), static_cast<unsigned>(response[2]));
+        LOG_WARN("Modbus exception id=0x%x code=0x%x", static_cast<unsigned>(response[0]), static_cast<unsigned>(response[2]));
         return false;
     }
     if (responseLength != expectedLength || response[1] != MODBUS_READ_HOLDING_REGISTERS || response[2] != count * 2) {
-        // LOG_DEBUG("Modbus bad frame id=0x%x fn=0x%x bytes=%u len=%u expected=%u", static_cast<unsigned>(response[0]), static_cast<unsigned>(response[1]), static_cast<unsigned>(response[2]), static_cast<unsigned>(responseLength), static_cast<unsigned>(expectedLength));
+        LOG_DEBUG("Modbus bad frame id=0x%x fn=0x%x bytes=%u len=%u expected=%u", static_cast<unsigned>(response[0]), static_cast<unsigned>(response[1]), static_cast<unsigned>(response[2]), static_cast<unsigned>(responseLength), static_cast<unsigned>(expectedLength));
         return false;
     }
 
     const uint16_t receivedCrc = static_cast<uint16_t>(response[responseLength - 2]) |
                                  (static_cast<uint16_t>(response[responseLength - 1]) << 8);
     if (receivedCrc != calculateCRC16(response, responseLength - 2)) {
-        // LOG_DEBUG("Modbus CRC error id=0x%x received=0x%04x", static_cast<unsigned>(slaveId), static_cast<unsigned>(receivedCrc));
+        LOG_DEBUG("Modbus CRC error id=0x%x received=0x%04x", static_cast<unsigned>(slaveId), static_cast<unsigned>(receivedCrc));
         return false;
     }
 
@@ -281,7 +281,7 @@ int32_t RS485TelemetryModule::runOnce()
         temperatureTelemetry.variant.environment_metrics.temperature = waterTemperature;
         sendTelemetry(temperatureTelemetry);
     } else {
-        // LOG_WARN("Y4000 Modbus read failed");
+        LOG_WARN("Y4000 Modbus read failed");
     }
 
     meshtastic_EnvironmentMetrics weatherMetrics = meshtastic_EnvironmentMetrics_init_zero;
@@ -293,7 +293,7 @@ int32_t RS485TelemetryModule::runOnce()
         weatherTelemetry.variant.environment_metrics = weatherMetrics;
         sendTelemetry(weatherTelemetry);
     } else {
-        // LOG_WARN("SEN0657 Modbus read failed");
+        LOG_WARN("SEN0657 Modbus read failed");
     }
 
     return POLL_INTERVAL_MS;

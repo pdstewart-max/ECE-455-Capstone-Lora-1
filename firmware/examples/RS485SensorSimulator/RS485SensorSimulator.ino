@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <ArduinoRS485.h>
 #include <cstring>
+#include <cstdlib>
 
 // Match the working RAK5802 sketch: UART0 GPIO0/1, DE GPIO6, and RE GPIO1.
 constexpr uint8_t RS485_TX_PIN = 0;
@@ -11,12 +12,24 @@ constexpr uint8_t Y4000_ADDRESS = 1;
 constexpr uint8_t SEN0657_ADDRESS = 2;
 constexpr size_t REQUEST_LENGTH = 8;
 constexpr uint32_t HEARTBEAT_INTERVAL_MS = 10000;
+constexpr uint32_t SENSOR_UPDATE_INTERVAL_MS = 2000; // Update sensor values every 2 seconds
 
 uint16_t y4000Registers[16];
 uint16_t sen0657Registers[14];
 uint8_t requestFrame[REQUEST_LENGTH];
 size_t requestLength = 0;
 uint32_t lastHeartbeat = 0;
+uint32_t lastSensorUpdate = 0;
+
+// Dynamic simulation baseline state variables for Y4000 (IEEE 754 floats)
+float y4000_do   = 8.25f;    // Dissolved oxygen, mg/L
+float y4000_turb = 12.3f;    // Turbidity, NTU
+float y4000_cond = 1.234f;   // Conductivity, mS/cm
+float y4000_ph   = 7.12f;    // pH
+float y4000_temp = 20.5f;    // Water Temp, C
+float y4000_orp  = 156.0f;   // ORP, mV
+float y4000_chla = 1.2f;     // Chlorophyll
+float y4000_bga  = 0.5f;     // Blue-green algae
 
 void printHexByte(uint8_t value)
 {
@@ -41,8 +54,69 @@ void setY4000Float(uint8_t firstRegister, float value)
 {
     uint8_t bytes[sizeof(value)];
     memcpy(bytes, &value, sizeof(value));
-    y4000Registers[firstRegister] = (static_cast<uint16_t>(bytes[0]) << 8) | bytes[1];
+    y4000Registers[firstRegister]     = (static_cast<uint16_t>(bytes[0]) << 8) | bytes[1];
     y4000Registers[firstRegister + 1] = (static_cast<uint16_t>(bytes[2]) << 8) | bytes[3];
+}
+
+float randomFloat(float minVal, float maxVal)
+{
+    float scale = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+    return minVal + scale * (maxVal - minVal);
+}
+
+void updateSensorData()
+{
+    if (millis() - lastSensorUpdate < SENSOR_UPDATE_INTERVAL_MS) {
+        return;
+    }
+    lastSensorUpdate = millis();
+
+    // 1. Update Y4000 Sensors (Random Walk on Floats with bounds clamping)
+    y4000_do   = constrain(y4000_do   + randomFloat(-0.05f, 0.05f), 5.0f, 12.0f);
+    y4000_turb = constrain(y4000_turb + randomFloat(-0.2f,  0.2f),  0.0f, 50.0f);
+    y4000_cond = constrain(y4000_cond + randomFloat(-0.01f, 0.01f), 0.5f, 3.0f);
+    y4000_ph   = constrain(y4000_ph   + randomFloat(-0.02f, 0.02f), 6.0f, 8.5f);
+    y4000_temp = constrain(y4000_temp + randomFloat(-0.1f,  0.1f),  10.0f, 35.0f);
+    y4000_orp  = constrain(y4000_orp  + randomFloat(-1.0f,  1.0f),  50.0f, 300.0f);
+
+    setY4000Float(0,  y4000_do);
+    setY4000Float(2,  y4000_turb);
+    setY4000Float(4,  y4000_cond);
+    setY4000Float(6,  y4000_ph);
+    setY4000Float(8,  y4000_temp);
+    setY4000Float(10, y4000_orp);
+    setY4000Float(12, y4000_chla);
+    setY4000Float(14, y4000_bga);
+
+    // 2. Update SEN0657 Sensors (Random Walk on Scaled Integers)
+    // Wind Speed (scaled x10, e.g., 23 = 2.3 m/s)
+    int16_t windSpeed = static_cast<int16_t>(sen0657Registers[0]) + random(-2, 3);
+    sen0657Registers[0] = constrain(windSpeed, 0, 150);
+
+    // Wind Direction Degrees (0° - 359°)
+    int16_t windDir = static_cast<int16_t>(sen0657Registers[3]) + random(-5, 6);
+    if (windDir < 0) windDir += 360;
+    if (windDir >= 360) windDir -= 360;
+    sen0657Registers[3] = windDir;
+    sen0657Registers[2] = windDir / 45; // Direction sector (0 - 7)
+
+    // Humidity (scaled x10, 602 = 60.2%)
+    int16_t humidity = static_cast<int16_t>(sen0657Registers[4]) + random(-3, 4);
+    sen0657Registers[4] = constrain(humidity, 300, 950);
+
+    // Air Temperature (scaled x10, 215 = 21.5 C)
+    int16_t airTemp = static_cast<int16_t>(sen0657Registers[5]) + random(-2, 3);
+    sen0657Registers[5] = constrain(airTemp, 100, 400);
+
+    // Atmospheric Pressure (1013 = 1013 hPa)
+    int16_t pressure = static_cast<int16_t>(sen0657Registers[9]) + random(-1, 2);
+    sen0657Registers[9] = constrain(pressure, 980, 1040);
+
+    // Illumination
+    int32_t lux = static_cast<int32_t>(sen0657Registers[12]) + random(-150, 151);
+    lux = constrain(lux, 500, 50000);
+    sen0657Registers[11] = static_cast<uint16_t>(lux);
+    sen0657Registers[12] = static_cast<uint16_t>(lux);
 }
 
 bool lookupRegister(uint8_t address, uint16_t registerAddress, uint16_t &value)
@@ -168,27 +242,27 @@ void processRequestByte(uint8_t byte)
 
 void initializeSamples()
 {
-    // Y4000 registers 0x2601-0x2610 contain eight little-endian IEEE-754 values.
-    setY4000Float(0, 8.25f);   // Dissolved oxygen, mg/L
-    setY4000Float(2, 12.3f);   // Turbidity, NTU
-    setY4000Float(4, 1.234f);  // Conductivity, mS/cm
-    setY4000Float(6, 7.12f);   // pH
-    setY4000Float(8, 20.5f);   // Temperature, C
-    setY4000Float(10, 156.0f); // ORP, mV
-    setY4000Float(12, 0.0f);   // Chlorophyll
-    setY4000Float(14, 0.0f);   // Blue-green algae
+    // Write initial state variables into Y4000 registers
+    setY4000Float(0,  y4000_do);
+    setY4000Float(2,  y4000_turb);
+    setY4000Float(4,  y4000_cond);
+    setY4000Float(6,  y4000_ph);
+    setY4000Float(8,  y4000_temp);
+    setY4000Float(10, y4000_orp);
+    setY4000Float(12, y4000_chla);
+    setY4000Float(14, y4000_bga);
 
-    // SEN0657 documented registers, using its configured 9600-baud bus rate.
-    sen0657Registers[0] = 23;    // 0x01F4 wind speed: 2.3 m/s
-    sen0657Registers[1] = 0;
-    sen0657Registers[2] = 2;     // 0x01F6 direction sector
-    sen0657Registers[3] = 90;    // 0x01F7 direction degrees
-    sen0657Registers[4] = 602;   // 0x01F8 humidity: 60.2%
-    sen0657Registers[5] = 215;   // 0x01F9 temperature: 21.5 C
-    sen0657Registers[6] = 0;
-    sen0657Registers[7] = 0;
-    sen0657Registers[8] = 0;
-    sen0657Registers[9] = 1013;  // 0x01FD pressure: 101.3 kPa / 1013 hPa
+    // SEN0657 initial register values
+    sen0657Registers[0]  = 23;   // 0x01F4 wind speed: 2.3 m/s
+    sen0657Registers[1]  = 0;
+    sen0657Registers[2]  = 2;    // 0x01F6 direction sector
+    sen0657Registers[3]  = 90;   // 0x01F7 direction degrees
+    sen0657Registers[4]  = 602;  // 0x01F8 humidity: 60.2%
+    sen0657Registers[5]  = 215;  // 0x01F9 temperature: 21.5 C
+    sen0657Registers[6]  = 0;
+    sen0657Registers[7]  = 0;
+    sen0657Registers[8]  = 0;
+    sen0657Registers[9]  = 1013; // 0x01FD pressure: 101.3 kPa / 1013 hPa
     sen0657Registers[10] = 0;    // 0x01FE illumination high word
     sen0657Registers[11] = 5000; // 0x01FF illumination low word
     sen0657Registers[12] = 5000; // 0x0200 illumination
@@ -204,14 +278,20 @@ void setup()
     digitalWrite(WB_IO2, HIGH);
     delay(500);
     RS485.receive();
+
+    randomSeed(analogRead(0)); // Seed random noise generator
+
     initializeSamples();
     Serial.println("RS485 sensor simulator ready: Y4000 ID 1, SEN0657 ID 2, 9600 baud");
     Serial.println("RS485 UART: GPIO0/1, DE=GPIO6, RE=GPIO1");
     lastHeartbeat = millis();
+    lastSensorUpdate = millis();
 }
 
 void loop()
 {
+    updateSensorData(); // Periodically drift simulated sensor values
+
     while (RS485.available()) {
         const uint8_t byte = static_cast<uint8_t>(RS485.read());
         Serial.print("RX byte=0x");
