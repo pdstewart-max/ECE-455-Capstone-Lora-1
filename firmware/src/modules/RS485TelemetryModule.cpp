@@ -7,6 +7,8 @@
 #include "MeshService.h"
 #include "Router.h"
 #include "gps/RTC.h"
+#include "mesh/Throttle.h"
+#include "UptimeClock.h"
 
 #include <ArduinoRS485.h>
 #include <cstring>
@@ -23,18 +25,21 @@ namespace
 constexpr uint8_t Y4000_SLAVE_ID = 1;
 constexpr uint8_t SEN0657_SLAVE_ID = 2;
 constexpr uint16_t MODBUS_READ_HOLDING_REGISTERS = 0x03;
-constexpr uint32_t MODBUS_RESPONSE_TIMEOUT_MS = 3000;
-constexpr uint32_t POLL_INTERVAL_MS = 60 * 1000;
+// Bound blocking time on the cooperative mesh loop if a sensor or cable is absent.
+constexpr uint32_t MODBUS_RESPONSE_TIMEOUT_MS = 500;
+static_assert(RS485_SENSOR_WARMUP_MS <= RS485_SENSOR_POWER_ON_DURATION_MS,
+              "sensor warm-up must fit within the configured power-on duration");
+static_assert(RS485_SENSOR_POWER_ON_DURATION_MS <= 0x7FFFFFFFUL &&
+                  RS485_SENSOR_POWER_OFF_DURATION_MS <= 0x7FFFFFFFUL,
+              "sensor power durations must be at most 24.8 days");
 } // namespace
 
 RS485TelemetryModule::RS485TelemetryModule()
     : concurrency::OSThread("RS485Telemetry"),
       ProtobufModule("RS485Telemetry", meshtastic_PortNum_TELEMETRY_APP, &meshtastic_Telemetry_msg)
 {
-    // Power on 3V3_S rail for WisBlock Slot
-    pinMode(WB_IO2, OUTPUT);
-    digitalWrite(WB_IO2, HIGH);
-    delay(100);
+    pinMode(RS485_SENSOR_POWER_PIN, OUTPUT);
+    digitalWrite(RS485_SENSOR_POWER_PIN, RS485_SENSOR_POWER_OFF);
 
     // Initialize ArduinoRS485 using native Serial1
     RS485.setPins(RS485_TX_PIN, RS485_DE_PIN, RS485_RE_PIN);
@@ -42,7 +47,7 @@ RS485TelemetryModule::RS485TelemetryModule()
     RS485.receive();
 
     LOG_INFO("RS485 transport=ArduinoRS485 UART=Serial1 TX=0 RX=1 DE=6 RE=-1");
-    setIntervalFromNow(POLL_INTERVAL_MS);
+    setIntervalFromNow(RS485_SENSOR_INITIAL_DELAY_MS);
 }
 
 uint16_t RS485TelemetryModule::calculateCRC16(const uint8_t *buffer, size_t length)
@@ -265,38 +270,58 @@ bool RS485TelemetryModule::handleReceivedProtobuf(const meshtastic_MeshPacket &,
 
 int32_t RS485TelemetryModule::runOnce()
 {
-    meshtastic_SoilWaterMetrics waterMetrics = meshtastic_SoilWaterMetrics_init_zero;
-    float waterTemperature = 0;
-    if (readY4000(waterMetrics, waterTemperature)) {
-        meshtastic_Telemetry waterTelemetry = meshtastic_Telemetry_init_zero;
-        waterTelemetry.time = getTime();
-        waterTelemetry.which_variant = meshtastic_Telemetry_soil_water_metrics_tag;
-        waterTelemetry.variant.soil_water_metrics = waterMetrics;
-        sendTelemetry(waterTelemetry);
-
-        meshtastic_Telemetry temperatureTelemetry = meshtastic_Telemetry_init_zero;
-        temperatureTelemetry.time = waterTelemetry.time;
-        temperatureTelemetry.which_variant = meshtastic_Telemetry_environment_metrics_tag;
-        temperatureTelemetry.variant.environment_metrics.has_temperature = true;
-        temperatureTelemetry.variant.environment_metrics.temperature = waterTemperature;
-        sendTelemetry(temperatureTelemetry);
-    } else {
-        LOG_WARN("Y4000 Modbus read failed");
+    if (!sensorPowerOn) {
+        digitalWrite(RS485_SENSOR_POWER_PIN, RS485_SENSOR_POWER_ON);
+        sensorPowerOn = true;
+        sensorReadComplete = false;
+        sensorPowerStartedAtMs = Time::getMillis();
+        LOG_DEBUG("External sensor rail enabled");
+        return RS485_SENSOR_WARMUP_MS;
     }
 
-    meshtastic_EnvironmentMetrics weatherMetrics = meshtastic_EnvironmentMetrics_init_zero;
-    uint16_t rainfallTenthsMm = 0;
-    if (readSEN0657(weatherMetrics, rainfallTenthsMm)) {
-        meshtastic_Telemetry weatherTelemetry = meshtastic_Telemetry_init_zero;
-        weatherTelemetry.time = getTime();
-        weatherTelemetry.which_variant = meshtastic_Telemetry_environment_metrics_tag;
-        weatherTelemetry.variant.environment_metrics = weatherMetrics;
-        sendTelemetry(weatherTelemetry);
-    } else {
-        LOG_WARN("SEN0657 Modbus read failed");
+    if (!sensorReadComplete) {
+        meshtastic_SoilWaterMetrics waterMetrics = meshtastic_SoilWaterMetrics_init_zero;
+        float waterTemperature = 0;
+        if (readY4000(waterMetrics, waterTemperature)) {
+            meshtastic_Telemetry waterTelemetry = meshtastic_Telemetry_init_zero;
+            waterTelemetry.time = getTime();
+            waterTelemetry.which_variant = meshtastic_Telemetry_soil_water_metrics_tag;
+            waterTelemetry.variant.soil_water_metrics = waterMetrics;
+            sendTelemetry(waterTelemetry);
+
+            meshtastic_Telemetry temperatureTelemetry = meshtastic_Telemetry_init_zero;
+            temperatureTelemetry.time = waterTelemetry.time;
+            temperatureTelemetry.which_variant = meshtastic_Telemetry_environment_metrics_tag;
+            temperatureTelemetry.variant.environment_metrics.has_temperature = true;
+            temperatureTelemetry.variant.environment_metrics.temperature = waterTemperature;
+            sendTelemetry(temperatureTelemetry);
+        } else {
+            LOG_WARN("Y4000 Modbus read failed");
+        }
+
+        meshtastic_EnvironmentMetrics weatherMetrics = meshtastic_EnvironmentMetrics_init_zero;
+        uint16_t rainfallTenthsMm = 0;
+        if (readSEN0657(weatherMetrics, rainfallTenthsMm)) {
+            meshtastic_Telemetry weatherTelemetry = meshtastic_Telemetry_init_zero;
+            weatherTelemetry.time = getTime();
+            weatherTelemetry.which_variant = meshtastic_Telemetry_environment_metrics_tag;
+            weatherTelemetry.variant.environment_metrics = weatherMetrics;
+            sendTelemetry(weatherTelemetry);
+        } else {
+            LOG_WARN("SEN0657 Modbus read failed");
+        }
+        sensorReadComplete = true;
     }
 
-    return POLL_INTERVAL_MS;
+    if (!Throttle::hasElapsed(sensorPowerStartedAtMs, RS485_SENSOR_POWER_ON_DURATION_MS)) {
+        const uint32_t elapsedMs = Time::getMillis() - sensorPowerStartedAtMs;
+        return RS485_SENSOR_POWER_ON_DURATION_MS - elapsedMs;
+    }
+
+    digitalWrite(RS485_SENSOR_POWER_PIN, RS485_SENSOR_POWER_OFF);
+    sensorPowerOn = false;
+    LOG_DEBUG("External sensor rail disabled");
+    return RS485_SENSOR_POWER_OFF_DURATION_MS;
 }
 
 RS485TelemetryModule *rs485TelemetryModule;

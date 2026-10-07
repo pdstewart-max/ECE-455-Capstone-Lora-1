@@ -105,7 +105,6 @@
 #endif
 #endif
 
-#include "modules/PocTimeModule.h"
 
 #if !MESHTASTIC_EXCLUDE_EXTERNALNOTIFICATION
 #include "modules/ExternalNotificationModule.h"
@@ -139,7 +138,7 @@ void setupModules()
         buzzerFeedbackThread = new BuzzerFeedbackThread();
     }
 #endif
-pocTimeModule = new PocTimeModule();
+
 #if defined(RAK11310)
 rs485TelemetryModule = new RS485TelemetryModule();
 #endif
