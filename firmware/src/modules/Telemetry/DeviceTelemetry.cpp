@@ -32,8 +32,7 @@ int32_t DeviceTelemetryModule::runOnce()
         airTime->isTxAllowedChannelUtil(!isImpoliteRole) && airTime->isTxAllowedAirUtil() &&
         config.device.role != meshtastic_Config_DeviceConfig_Role_CLIENT_HIDDEN &&
         moduleConfig.telemetry.device_telemetry_enabled) {
-        sendTelemetry();
-        if (transmitHistory)
+        if (sendTelemetry() && transmitHistory)
             transmitHistory->setLastSentToMesh(TX_HISTORY_KEY_DEVICE_TELEMETRY);
     } else if (service->isToPhoneQueueEmpty()) {
         // Just send to phone when it's not our time to send to mesh yet
@@ -208,7 +207,8 @@ bool DeviceTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
         service->sendToPhone(p);
     } else {
         LOG_INFO("Send packet to mesh");
-        service->sendToMesh(p, RX_SRC_LOCAL, true);
+        ErrorCode result = service->sendToMesh(p, RX_SRC_LOCAL, true);
+        return result == ERRNO_OK || result == ERRNO_SHOULD_RELEASE;
     }
     return true;
 }

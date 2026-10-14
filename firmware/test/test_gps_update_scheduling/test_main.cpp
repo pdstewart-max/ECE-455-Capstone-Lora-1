@@ -1,3 +1,6 @@
+// Tests GPSUpdateScheduling::msUntilNextSearch() in src/gps/GPSUpdateScheduling.cpp. A failed
+// search must still honor gps_update_interval; using position_broadcast_secs as a retry delay
+// silently stretches a configured two-minute GPS poll to as long as the position broadcast period.
 #include "Arduino.h"
 #include "TestUtil.h"
 #include "UptimeClock.h"
@@ -167,6 +170,25 @@ static void test_reset_clears_the_search_state(void)
     TEST_ASSERT_EQUAL_UINT32(0, s.elapsedSearchMs());
 }
 
+static void test_failed_search_retries_at_configured_gps_interval(void)
+{
+    uint32_t oldGpsInterval = config.position.gps_update_interval;
+    uint32_t oldBroadcastInterval = config.position.position_broadcast_secs;
+    config.position.gps_update_interval = 120;
+    config.position.position_broadcast_secs = 1800;
+
+    GPSUpdateScheduling s;
+    Time::setTestMillis(10 * 1000);
+    s.informSearching();
+    Time::advanceTestMillis(10 * 1000);
+    s.informSearchFailed();
+    uint32_t actual = s.msUntilNextSearch();
+
+    config.position.gps_update_interval = oldGpsInterval;
+    config.position.position_broadcast_secs = oldBroadcastInterval;
+    TEST_ASSERT_EQUAL_UINT32(120 * 1000, actual);
+}
+
 void setup()
 {
     delay(10);
@@ -185,6 +207,7 @@ void setup()
     RUN_TEST(test_search_ending_after_the_wrap_reads_as_idle);
     RUN_TEST(test_search_starting_after_the_wrap_reads_as_searching);
     RUN_TEST(test_reset_clears_the_search_state);
+    RUN_TEST(test_failed_search_retries_at_configured_gps_interval);
     exit(UNITY_END());
 }
 

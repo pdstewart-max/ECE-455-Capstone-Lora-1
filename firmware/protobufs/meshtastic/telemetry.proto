@@ -335,6 +335,16 @@ message SoilWaterMetrics {
    * Solar irradiance in W/m^2 (distinct from the radiation field's uR/h)
    */
   optional float solar_irradiance = 15;
+
+  /*
+   * Chlorophyll concentration in µg/L
+   */
+  optional float chlorophyll = 16;
+
+  /*
+   * Blue-green algae concentration in cells/mL
+   */
+  optional float bga = 17;
 }
 
 /*

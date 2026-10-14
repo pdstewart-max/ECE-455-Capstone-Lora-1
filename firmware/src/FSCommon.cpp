@@ -327,6 +327,9 @@ void listDir(const char *dirname, uint8_t levels, bool del)
 {
 #ifdef FSCom
     char buffer[255];
+#ifdef ARCH_RP2040
+    char filepathBuffer[255];
+#endif
     File root = FSCom.open(dirname, FILE_O_READ);
     if (!root || !root.isDirectory())
         return;
@@ -335,6 +338,13 @@ void listDir(const char *dirname, uint8_t levels, bool del)
     while (file && file.name()[0]) { // file.name()[0] check: workaround for Adafruit LittleFS nRF52 bug #4395
 #ifdef ARCH_ESP32
         const char *filepath = file.path();
+#elif defined(ARCH_RP2040)
+        if (file.name()[0] == '/') {
+            strlcpy(filepathBuffer, file.name(), sizeof(filepathBuffer));
+        } else {
+            snprintf(filepathBuffer, sizeof(filepathBuffer), "%s/%s", dirname, file.name());
+        }
+        const char *filepath = filepathBuffer;
 #else
         const char *filepath = file.name();
 #endif
@@ -346,7 +356,8 @@ void listDir(const char *dirname, uint8_t levels, bool del)
                     strncpy(buffer, filepath, sizeof(buffer) - 1);
                     buffer[sizeof(buffer) - 1] = '\0';
                     file.close();
-                    FSCom.rmdir(buffer);
+                    if (!FSCom.rmdir(buffer))
+                        LOG_ERROR("Can't remove directory %s", buffer);
                 } else {
                     file.close();
                 }
@@ -357,7 +368,8 @@ void listDir(const char *dirname, uint8_t levels, bool del)
                 strncpy(buffer, filepath, sizeof(buffer) - 1);
                 buffer[sizeof(buffer) - 1] = '\0';
                 file.close();
-                FSCom.remove(buffer);
+                if (!FSCom.remove(buffer))
+                    LOG_ERROR("Can't remove %s", buffer);
             } else {
                 LOG_TRACE(" %s (%i Bytes)", filepath, file.size());
                 file.close();
@@ -367,6 +379,8 @@ void listDir(const char *dirname, uint8_t levels, bool del)
     }
 #ifdef ARCH_ESP32
     const char *rootpath = root.path();
+#elif defined(ARCH_RP2040)
+    const char *rootpath = dirname;
 #else
     const char *rootpath = root.name();
 #endif
@@ -375,7 +389,8 @@ void listDir(const char *dirname, uint8_t levels, bool del)
         strncpy(buffer, rootpath, sizeof(buffer) - 1);
         buffer[sizeof(buffer) - 1] = '\0';
         root.close();
-        FSCom.rmdir(buffer);
+        if (!FSCom.rmdir(buffer))
+            LOG_ERROR("Can't remove directory %s", buffer);
     } else {
         root.close();
     }

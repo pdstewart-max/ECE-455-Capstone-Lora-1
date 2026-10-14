@@ -24,6 +24,10 @@
 
 #define DETECTION_SENSOR_EN 28
 
+// Broadcast device metrics over LoRa every two minutes.
+#define USERPREFS_CONFIG_DEVICE_TELEMETRY_ENABLED true
+#define USERPREFS_CONFIG_DEVICE_TELEM_UPDATE_INTERVAL 120 // time in seconds between telemetry broadcasts
+
 #define HAS_GPS 1
 #define GPS_SERIAL_PORT Serial1
 #define GPS_RX_PIN PIN_SERIAL1_RX
@@ -39,7 +43,7 @@ static_assert(RS485_SENSOR_POWER_PIN != PIN_GPS_EN, "sensor rail switch must not
 // Sensor rail duty cycle; adjust these durations for the deployment.
 #define RS485_SENSOR_WARMUP_MS (5UL * 1000UL) // 5 seconds is sufficient for the DFRobot SEN0657 Weather Station to stabilize
 #define RS485_SENSOR_POWER_ON_DURATION_MS (15UL * 1000UL)   // 15 seconds is sufficient for the DFRobot SEN0657 Weather Station to complete a measurement cycle
-#define RS485_SENSOR_POWER_OFF_DURATION_MS (30UL * 60UL * 1000UL) // 30 minutes is a reasonable interval between measurements for the DFRobot SEN0657 Weather Station
+#define RS485_SENSOR_POWER_OFF_DURATION_MS (2UL * 60UL * 1000UL) // Two minutes between sensor measurement cycles
 #define RS485_SENSOR_INITIAL_DELAY_MS (1UL * 1000UL) // 1 second delay before the first sensor power-on to allow the mesh stack to initialize
 
 #define USE_SX1262

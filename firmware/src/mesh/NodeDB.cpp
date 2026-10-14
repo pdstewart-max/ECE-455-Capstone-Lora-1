@@ -1729,6 +1729,9 @@ void NodeDB::installRoleDefaults(meshtastic_Config_DeviceConfig_Role role)
 void NodeDB::initModuleConfigIntervals()
 {
     // Zero out telemetry intervals so that they coalesce to defaults in Default.h
+#ifdef USERPREFS_CONFIG_DEVICE_TELEMETRY_ENABLED
+    moduleConfig.telemetry.device_telemetry_enabled = USERPREFS_CONFIG_DEVICE_TELEMETRY_ENABLED;
+#endif
 #ifdef USERPREFS_CONFIG_DEVICE_TELEM_UPDATE_INTERVAL
     moduleConfig.telemetry.device_update_interval = USERPREFS_CONFIG_DEVICE_TELEM_UPDATE_INTERVAL;
 #else
@@ -2942,6 +2945,9 @@ void NodeDB::loadFromDisk()
     if (moduleConfig.version < POSITION_TELEMETRY_OPTIN_VER) {
         LOG_INFO("Opt-in migration: forcing device telemetry broadcast to opt-in");
         optInDisableTelemetryBroadcast(moduleConfig);
+#ifdef USERPREFS_CONFIG_DEVICE_TELEMETRY_ENABLED
+        moduleConfig.telemetry.device_telemetry_enabled = USERPREFS_CONFIG_DEVICE_TELEMETRY_ENABLED;
+#endif
         moduleConfig.version = POSITION_TELEMETRY_OPTIN_VER;
         saveToDisk(SEGMENT_MODULECONFIG);
     }

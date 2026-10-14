@@ -88,20 +88,6 @@ uint32_t GPSUpdateScheduling::msUntilNextSearch()
     // Target interval (seconds), between GPS updates
     uint32_t updateInterval = Default::getConfiguredOrDefaultMs(config.position.gps_update_interval, default_gps_update_interval);
 
-    // After a failed search, back off: indoors / no-sky environments will keep failing,
-    // so wake at most once per broadcast interval rather than once per gps_update_interval.
-    // Capped at 1 hour so a user-configured very-long broadcast interval still retries
-    // periodically (in case conditions change). Reset on any successful lock.
-    if (consecutiveFailures > 0) {
-        constexpr uint32_t failureRetryCapMs = 60UL * 60UL * 1000UL; // 1 hour cap
-        uint32_t failureSleepMs =
-            Default::getConfiguredOrDefaultMs(config.position.position_broadcast_secs, default_broadcast_interval_secs);
-        if (failureSleepMs > failureRetryCapMs)
-            failureSleepMs = failureRetryCapMs;
-        if (updateInterval < failureSleepMs)
-            updateInterval = failureSleepMs;
-    }
-
     // Check how long until we should start searching, to hopefully hit our target interval
     uint32_t dueAtMs = searchEndedMs + updateInterval;
     uint32_t compensatedStart = dueAtMs - predictedMsToGetLock;

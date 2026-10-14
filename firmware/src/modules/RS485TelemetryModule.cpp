@@ -207,11 +207,18 @@ bool RS485TelemetryModule::readY4000(meshtastic_SoilWaterMetrics &waterMetrics, 
     temperature = decodeY4000Float(&registers[8]);
     waterMetrics.has_orp = true;
     waterMetrics.orp = decodeY4000Float(&registers[10]);
+    const float chlorophyll = decodeY4000Float(&registers[12]);
+    const float bga = decodeY4000Float(&registers[14]);
+    waterMetrics.has_chlorophyll = true;
+    waterMetrics.chlorophyll = chlorophyll;
+    waterMetrics.has_bga = true;
+    waterMetrics.bga = bga;
 
     // Primary output for Yosemitech Y4000 Sonde
-    LOG_INFO("Y4000 Water Quality -> DO: %.2f mg/L | Turbidity: %.2f NTU | Conductivity: %.3f mS/cm | pH: %.2f | Temp: %.2f C | ORP: %.1f mV | Chlorophyll: %.2f ug/L | BGA: %.2f cells/mL",
+    LOG_INFO("Y4000 Water Quality -> DO: %.2f mg/L | Turbidity: %.2f NTU | Conductivity: %.3f mS/cm | pH: %.2f | Temp: %.2f C | ORP: %.1f mV | Chlorophyll: %.2f ug/L",
              waterMetrics.dissolved_oxygen, waterMetrics.turbidity, waterMetrics.electrical_conductivity,
-             waterMetrics.ph, temperature, waterMetrics.orp, decodeY4000Float(&registers[12]), decodeY4000Float(&registers[14]));
+             waterMetrics.ph, temperature, waterMetrics.orp, chlorophyll);
+    LOG_INFO("Y4000 BGA -> %.2f cells/mL", bga);
     return true;
 }
 
@@ -240,6 +247,8 @@ bool RS485TelemetryModule::readSEN0657(meshtastic_EnvironmentMetrics &weatherMet
     weatherMetrics.has_lux = true;
     weatherMetrics.lux = static_cast<float>((static_cast<uint32_t>(pressureLight[1]) << 16) | pressureLight[2]);
     rainfallTenthsMm = rainfall[0];
+    weatherMetrics.has_rainfall_1h = true;
+    weatherMetrics.rainfall_1h = rainfallTenthsMm / 10.0f;
 
     // Primary output for DFRobot SEN0657 Weather Station
     LOG_INFO("SEN0657 Weather Station -> Temp: %.1f C | Humidity: %.1f %% | Pressure: %.1f hPa | Wind Speed: %.1f m/s | Wind Dir: %u deg | Lux: %.0f | Rainfall: %.1f mm",
