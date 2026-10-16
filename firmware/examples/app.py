@@ -1,9 +1,31 @@
 import sqlite3
 import json
+import importlib.util
 import math
 import os
 import struct
+import subprocess
+import sys
 import threading
+
+
+def ensure_dependencies():
+    dependencies = {
+        "pubsub": "PyPubSub",
+        "meshtastic": "meshtastic",
+        "flask": "Flask",
+    }
+    missing = [
+        package for module, package in dependencies.items()
+        if importlib.util.find_spec(module) is None
+    ]
+    if missing:
+        print(f"Installing missing dependencies: {', '.join(missing)}")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
+
+
+ensure_dependencies()
+
 from pubsub import pub
 import meshtastic
 import meshtastic.serial_interface
@@ -12,7 +34,7 @@ from flask import Flask, jsonify, render_template_string, redirect, request, url
 # -------------------------------------------------------------------
 # CONFIGURATION
 # -------------------------------------------------------------------
-SERIAL_PORT = "COM6"  # Your active USB receiver port
+SERIAL_PORT = os.environ.get("MESHTASTIC_SERIAL_PORT")
 DB_FILE = os.environ.get("WATER_MONITOR_DB", "water_monitor.db")
 
 METRIC_FIELDS = [
@@ -481,12 +503,17 @@ def on_receive(packet, interface):
 def start_meshtastic():
     pub.subscribe(on_receive, "meshtastic.receive")
     try:
-        print(f"Connecting to USB Base Node on {SERIAL_PORT}...")
+        port_description = SERIAL_PORT or "the auto-detected port"
+        print(f"Connecting to USB Base Node on {port_description}...")
         serial_interface = meshtastic.serial_interface.SerialInterface(devPath=SERIAL_PORT)
+        if not serial_interface.devPath:
+            raise RuntimeError("No Meshtastic serial device was detected.")
         sync_known_nodes(serial_interface)
-        print(f"Connected to USB Base Node on {SERIAL_PORT} successfully!")
+        print(f"Connected to USB Base Node on {serial_interface.devPath} successfully!")
+    except SystemExit as e:
+        print(f"USB Connection Error: {e}")
     except Exception as e:
-        print(f"USB Connection Error on {SERIAL_PORT}: {e}")
+        print(f"USB Connection Error on {port_description}: {e}")
 
 # -------------------------------------------------------------------
 # 3. Local Web Dashboard (Flask + Leaflet.js)
@@ -713,7 +740,7 @@ NODE_DATA_UI = """
         .chart-panel { padding: 16px; }
         .chart-panel h2 { margin-bottom: 4px; }
         .chart-canvas { display: block; width: 100%; height: 440px; margin-top: 12px; }
-        #comparison-nodes { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; }
+        #additional-nodes { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; }
         .node-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
         .node-check input { min-height: 0; }
         .status { min-height: 18px; margin-top: 8px; }
@@ -745,8 +772,8 @@ NODE_DATA_UI = """
         <div id="current-readings"></div>
     </section>
 
-    <section class="panel">
-        <h2>History settings</h2>
+    <section class="panel chart-panel">
+        <h2>Measurement history</h2>
         <div class="chart-controls">
             <div class="control">
                 <label for="metric-select">Measurement</label>
@@ -789,21 +816,11 @@ NODE_DATA_UI = """
             </div>
         </div>
         <div id="scale-status" class="status muted"></div>
-    </section>
-
-    <section class="panel chart-panel">
-        <h2 id="single-chart-title">Selected node history</h2>
-        <div class="muted">History for the currently selected node.</div>
-        <canvas id="single-chart" class="chart-canvas" aria-label="Selected node measurement history"></canvas>
-        <div id="single-chart-status" class="status muted"></div>
-    </section>
-
-    <section class="panel chart-panel">
-        <h2 id="comparison-chart-title">Compare nodes</h2>
-        <div class="muted">Select other nodes to compare their history against the selected node.</div>
-        <div id="comparison-nodes"></div>
-        <canvas id="comparison-chart" class="chart-canvas" aria-label="Comparison of measurement history across nodes"></canvas>
-        <div id="comparison-chart-status" class="status muted"></div>
+        <h3 id="chart-title">Selected node history</h3>
+        <div class="muted">The selected node is always shown. Select other nodes to compare their history.</div>
+        <div id="additional-nodes"></div>
+        <canvas id="history-chart" class="chart-canvas" aria-label="Measurement history across selected nodes"></canvas>
+        <div id="history-chart-status" class="status muted"></div>
     </section>
 </main>
 <script>
@@ -900,8 +917,8 @@ NODE_DATA_UI = """
 
     function renderComparisonChoices() {
         const currentId = nodeSelect.value;
-        const selected = new Set(Array.from(document.querySelectorAll('#comparison-nodes input:checked')).map(input => input.value));
-        const container = document.getElementById('comparison-nodes');
+        const selected = new Set(Array.from(document.querySelectorAll('#additional-nodes input:checked')).map(input => input.value));
+        const container = document.getElementById('additional-nodes');
         container.innerHTML = nodes.filter(node => node.node_id !== currentId).map(node => {
             const label = node.node_name || node.node_id;
             return `<label class="node-check"><input type="checkbox" value="${escapeHtml(node.node_id)}"${selected.has(node.node_id) ? ' checked' : ''}><span style="color:${colorForNode(node.node_id)}">●</span>${escapeHtml(label)}</label>`;
@@ -909,7 +926,7 @@ NODE_DATA_UI = """
     }
 
     function selectedComparisonIds() {
-        return Array.from(document.querySelectorAll('#comparison-nodes input:checked')).map(input => input.value);
+        return Array.from(document.querySelectorAll('#additional-nodes input:checked')).map(input => input.value);
     }
 
     async function refreshNodes() {
@@ -1077,14 +1094,13 @@ NODE_DATA_UI = """
         const metricInfo = metrics.find(item => item.column === metric);
         const unit = displayUnit(metric);
         document.getElementById('temperature-unit-control').style.visibility = isTemperature(metric) ? 'visible' : 'hidden';
-        document.getElementById('single-chart-title').textContent = `${selected ? selected.node_name || selected.node_id : 'Selected node'} · ${metricInfo.label} history`;
-        document.getElementById('comparison-chart-title').textContent = `${metricInfo.label} · node comparison`;
+        document.getElementById('chart-title').textContent =
+            `${selected ? selected.node_name || selected.node_id : 'Selected node'} · ${metricInfo.label} history`;
         document.getElementById('scale-min').setAttribute('aria-label', `Vertical axis minimum in ${unit}`);
         document.getElementById('scale-max').setAttribute('aria-label', `Vertical axis maximum in ${unit}`);
         document.getElementById('scale-min-unit').textContent = unit || '—';
         document.getElementById('scale-max-unit').textContent = unit || '—';
-        drawChart('single-chart', 'single-chart-status', cachedSeries.slice(0, 1), metric, true);
-        drawChart('comparison-chart', 'comparison-chart-status', cachedSeries, metric, true);
+        drawChart('history-chart', 'history-chart-status', cachedSeries, metric, true);
     }
 
     async function loadCharts() {
@@ -1095,8 +1111,7 @@ NODE_DATA_UI = """
             renderCharts();
             return;
         }
-        document.getElementById('single-chart-status').textContent = 'Loading history…';
-        document.getElementById('comparison-chart-status').textContent = 'Loading history…';
+        document.getElementById('history-chart-status').textContent = 'Loading history…';
         try {
             const result = await Promise.all(nodeIds.map(nodeId => fetchSeries(nodeId, metricSelect.value)));
             if (sequence !== requestSequence) return;
@@ -1105,8 +1120,7 @@ NODE_DATA_UI = """
         } catch (error) {
             if (sequence !== requestSequence) return;
             console.error('Could not load chart data:', error);
-            document.getElementById('single-chart-status').textContent = 'Could not load measurement history.';
-            document.getElementById('comparison-chart-status').textContent = 'Could not load comparison history.';
+            document.getElementById('history-chart-status').textContent = 'Could not load measurement history.';
         }
     }
 
@@ -1131,7 +1145,7 @@ NODE_DATA_UI = """
         renderCurrentReadings();
         loadCharts();
     });
-    document.getElementById('comparison-nodes').addEventListener('change', loadCharts);
+    document.getElementById('additional-nodes').addEventListener('change', loadCharts);
     document.getElementById('apply-scale').addEventListener('click', renderCharts);
     document.getElementById('auto-scale').addEventListener('click', () => {
         scaleMin.value = '';
