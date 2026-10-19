@@ -13,6 +13,8 @@
 #include <ArduinoRS485.h>
 #include <cstring>
 
+#include "DriverDS18B20.h"
+
 // Pin definitions:
 // GPIO0 = TX, GPIO1 = RX (implicitly handled by Serial1), WB_IO1 (GPIO6) = DE/RE
 constexpr uint8_t RS485_TX_PIN = 0;
@@ -25,6 +27,7 @@ namespace
 constexpr uint8_t Y4000_SLAVE_ID = 1;
 constexpr uint8_t SEN0657_SLAVE_ID = 2;
 constexpr uint16_t MODBUS_READ_HOLDING_REGISTERS = 0x03;
+constexpr uint16_t MODBUS_WRITE_HOLDING_REGISTERS = 0x06;
 // Bound blocking time on the cooperative mesh loop if a sensor or cable is absent.
 constexpr uint32_t MODBUS_RESPONSE_TIMEOUT_MS = 500;
 static_assert(RS485_SENSOR_WARMUP_MS <= RS485_SENSOR_POWER_ON_DURATION_MS,
@@ -46,6 +49,9 @@ RS485TelemetryModule::RS485TelemetryModule()
     RS485.begin(RS485_BAUD);
     RS485.receive();
 
+    // Initialize DallasTemperature library for DS18B20 sensor
+    DriverDS18B20::init();
+
     LOG_INFO("RS485 transport=ArduinoRS485 UART=Serial1 TX=0 RX=1 DE=6 RE=-1");
     setIntervalFromNow(RS485_SENSOR_INITIAL_DELAY_MS);
 }
@@ -61,6 +67,73 @@ uint16_t RS485TelemetryModule::calculateCRC16(const uint8_t *buffer, size_t leng
     }
     return crc;
 }
+
+// bool RS485TelemetryModule::writeRegister(uint8_t slaveId, uint16_t registerAddr, uint16_t value) {
+//     delay(20);
+
+//     while (RS485.available()) // Flush stale bytes from buffer
+//         RS485.read();
+
+//     uint8_t request[8] = {
+//         slaveId,
+//         MODBUS_WRITE_HOLDING_REGISTERS,
+//         static_cast<uint8_t>(registerAddr >> 8),
+//         static_cast<uint8_t>(registerAddr),
+//         static_cast<uint8_t>(value >> 8),
+//         static_cast<uint8_t>(value),
+//         0, 0
+//     };
+//     uint16_t crc = calculateCRC16(request, 6);
+//     request[6] = static_cast<uint8_t>(crc);
+//     request[7] = static_cast<uint8_t>(crc >> 8);
+
+//     // Transmit request
+//     RS485.beginTransmission();
+//     RS485.write(request, sizeof(request));
+//     RS485.endTransmission(); // THIS IS A BLOCKING FUNCTION
+//     RS485.receive();
+
+//     while (RS485.available())
+//         RS485.read();
+
+//     uint8_t response[8];
+//     size_t responseLength = 0;
+//     const uint32_t startedAt = millis();
+
+//     while (static_cast<uint32_t>(millis() - startedAt) < MODBUS_RESPONSE_TIMEOUT_MS) {
+//         while (RS485.available() && responseLength < sizeof(response)) {
+//             response[responseLength++] = static_cast<uint8_t>(RS485.read());
+//         }
+//         if (responseLength == sizeof(response)) break;
+//     }
+
+//     // 4. Validate full length received
+//     if (responseLength < 8) {
+//         LOG_DEBUG("Modbus timeout or incomplete response: %u/8 bytes", responseLength);
+//         return false;
+//     }
+
+//     // 5. Check for Exception response (Function Code | 0x80)
+//     if (response[0] == slaveId && response[1] == (0x06 | 0x80)) {
+//         LOG_WARN("Modbus exception code: 0x%02X", response[2]);
+//         return false;
+//     }
+
+//     // 6. Validate CRC
+//     const uint16_t receivedCrc = static_cast<uint16_t>(response[6]) | (static_cast<uint16_t>(response[7]) << 8);
+//     if (receivedCrc != calculateCRC16(response, 6)) {
+//         LOG_DEBUG("Modbus CRC error");
+//         return false;
+//     }
+
+//     // 7. Verify Echo (Slave ID & Function Code match)
+//     if (response[0] != slaveId || response[1] != 0x06) {
+//         LOG_DEBUG("Modbus echo mismatch");
+//         return false;
+//     }
+
+//     return true; // Write successfully acknowledged by slave
+// }
 
 bool RS485TelemetryModule::readRegisters(uint8_t slaveId, uint16_t startRegister, uint16_t count, uint16_t *registers)
 {
@@ -93,15 +166,15 @@ bool RS485TelemetryModule::readRegisters(uint8_t slaveId, uint16_t startRegister
     // 3. Transmit request
     RS485.beginTransmission();
     RS485.write(request, sizeof(request));
-    RS485.endTransmission();
-
-    // 4. Wait ~1.2 ms (12 bit-times at 9600 baud) for the hardware UART shift register to clear
-    delayMicroseconds(1200);
-
-    // 5. Switch RS485 transceiver to receive mode
+    RS485.endTransmission(); // THIS IS A BLOCKING FUNCTION
+    
+    // Switch RS485 transceiver to receive mode
     RS485.receive();
 
-    // 6. Clear pin-toggle noise without delaying
+    // Extra wait time for hardware buffer to clear a frame (~12 bits @ 9600 baud) though not necessary because of RS485.endTransmission()
+    // delayMicroseconds(1200);
+    
+    // Clear pin-toggle noise without delaying
     while (RS485.available())
         RS485.read();
 
@@ -325,6 +398,20 @@ int32_t RS485TelemetryModule::runOnce()
     if (!Throttle::hasElapsed(sensorPowerStartedAtMs, RS485_SENSOR_POWER_ON_DURATION_MS)) {
         const uint32_t elapsedMs = Time::getMillis() - sensorPowerStartedAtMs;
         return RS485_SENSOR_POWER_ON_DURATION_MS - elapsedMs;
+    }
+
+    float temps[DS18B20_SENSOR_COUNT];
+    if (DriverDS18B20::readAllTemperatures(temps)) {
+        int16_t tempBuffer[DS18B20_SENSOR_COUNT];
+        for (int i = 0; i < DS18B20_SENSOR_COUNT; i++) {
+            tempBuffer[i] = static_cast<int16_t>(temps[i] * 16.0f); // -127 becomes -2032
+        }
+        meshtastic_Telemetry dsTelemetry = meshtastic_Telemetry_init_zero;
+        dsTelemetry.time = getTime();
+        dsTelemetry.which_variant = meshtastic_Telemetry_temp_string_metrics_tag;
+        dsTelemetry.variant.temp_string_metrics.temperatures.size = sizeof(tempBuffer);
+        std::memcpy(dsTelemetry.variant.temp_string_metrics.temperatures.bytes, tempBuffer, sizeof(tempBuffer));
+        sendTelemetry(dsTelemetry);
     }
 
     digitalWrite(RS485_SENSOR_POWER_PIN, RS485_SENSOR_POWER_OFF);

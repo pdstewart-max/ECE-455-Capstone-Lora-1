@@ -46,6 +46,10 @@ METRIC_FIELDS = [
     ("temperature", "REAL", "Sensor temperature", "°C"),
     ("air_temp", "REAL", "Air temperature", "°C"),
     ("water_temp", "REAL", "Water temperature", "°C"),
+    *[
+        (f"water_temp_{index}", "REAL", f"Water temperature {index}", "°C")
+        for index in range(14)
+    ],
     ("relative_humidity", "REAL", "Relative humidity", "%"),
     ("barometric_pressure", "REAL", "Barometric pressure", "hPa"),
     ("gas_resistance", "REAL", "Gas resistance", "MΩ"),
@@ -164,9 +168,17 @@ MAP_GROUPS = [
         "metrics": [
             METRIC_LABELS[column]
             for column in (
-                "water_temp", "electrical_conductivity", "dissolved_oxygen", "ph",
+                "water_temp",
+                "electrical_conductivity", "dissolved_oxygen", "ph",
                 "turbidity", "orp", "chlorophyll", "bga",
             )
+        ],
+    },
+    {
+        "label": "Temperature String",
+        "metrics": [
+            METRIC_LABELS[f"water_temp_{index}"]
+            for index in range(14)
         ],
     },
     {
@@ -460,6 +472,7 @@ def on_receive(packet, interface):
             soil_water_metrics = get_variant(telemetry, "soil_water_metrics")
             power_metrics = get_variant(telemetry, "power_metrics")
             air_quality_metrics = get_variant(telemetry, "air_quality_metrics")
+            temp_string_metrics = get_variant(telemetry, "temp_string_metrics")
             values = get_field_values(device_metrics, DEVICE_FIELDS)
             values.update(get_field_values(
                 environment_metrics, ENVIRONMENT_FIELDS, {"environment_voltage": "voltage"}
@@ -468,6 +481,16 @@ def on_receive(packet, interface):
             values.update(get_field_values(power_metrics, POWER_FIELDS))
             values.update(get_field_values(air_quality_metrics, AIR_QUALITY_FIELDS))
             values.update(decode_soil_water_metrics(decoded.get("payload")))
+
+            # Unpack the 28-byte custom temperature array into individual columns.
+            if temp_string_metrics and "temperatures" in temp_string_metrics:
+                raw_bytes = temp_string_metrics.get("temperatures")
+                if raw_bytes:
+                    for i in range(0, min(len(raw_bytes), 28), 2):
+                        sensor_idx = i // 2
+                        val_int = int.from_bytes(raw_bytes[i:i+2], byteorder='little', signed=True)
+                        values[f"water_temp_{sensor_idx}"] = val_int / 16
+                    print(f" -> [CUSTOM TEMP STRING DECODED] 14 Sensors parsed successfully.")
 
             temp = values.pop("temperature", None)
             if temp is not None:

@@ -253,6 +253,13 @@ message EnvironmentMetrics {
   reserved "soil_ph", "ph", "electrical_conductivity", "salinity", "nitrogen", "phosphorus", "potassium", "dissolved_oxygen", "orp", "chemical_oxygen_demand", "turbidity", "nitrate", "ammonium", "biochemical_oxygen_demand", "solar_irradiance";
 }
 
+message TempStringMetrics {
+  /*
+   * Temperature array from DS18B20
+   */
+  bytes temperatures = 1;
+}
+
 /*
  * Soil and water probe metrics.
  *
@@ -815,6 +822,11 @@ message Telemetry {
      * Soil and water probe metrics
      */
     SoilWaterMetrics soil_water_metrics = 11;
+
+    /*
+     * Temperature array from DS18B20
+     */
+    TempStringMetrics temp_string_metrics = 12;
   }
 }
 

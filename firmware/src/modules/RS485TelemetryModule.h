@@ -20,6 +20,7 @@ class RS485TelemetryModule : private concurrency::OSThread, public ProtobufModul
 		bool sensorReadComplete = false;
 		uint32_t sensorPowerStartedAtMs = 0;
 		bool readRegisters(uint8_t slaveId, uint16_t startRegister, uint16_t count, uint16_t *registers);
+		// bool writeRegister(uint8_t slaveId, uint16_t registerAddr, uint16_t value);
 		bool readY4000(meshtastic_SoilWaterMetrics &waterMetrics, float &temperature);
 		bool readSEN0657(meshtastic_EnvironmentMetrics &weatherMetrics, uint16_t &rainfallTenthsMm);
 		bool sendTelemetry(const meshtastic_Telemetry &telemetry);
