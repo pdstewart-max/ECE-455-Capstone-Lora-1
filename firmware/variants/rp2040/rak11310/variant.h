@@ -46,6 +46,16 @@ static_assert(RS485_SENSOR_POWER_PIN != PIN_GPS_EN, "sensor rail switch must not
 #define RS485_SENSOR_POWER_OFF_DURATION_MS (2UL * 60UL * 1000UL) // Two minutes between sensor measurement cycles // TODO - change to 30min for prod
 #define RS485_SENSOR_INITIAL_DELAY_MS (1UL * 1000UL) // 1 second delay before the first sensor power-on to allow the mesh stack to initialize
 
+// Set to 1 to broadcast synthetic telemetry for LoRa link testing without attached sensors.
+// Was seemingly having issues with actually seeing sent and recieved packets and wanted to make sure everything was working
+// Uploading with 1 on two nodes should result in them sending false data to each other
+#ifndef RAK11310_LORA_TEST_MODE
+#define RAK11310_LORA_TEST_MODE 0
+#endif
+#ifndef RAK11310_LORA_TEST_INTERVAL_MS
+#define RAK11310_LORA_TEST_INTERVAL_MS (30UL * 1000UL)
+#endif
+
 #define USE_SX1262
 
 #undef LORA_SCK

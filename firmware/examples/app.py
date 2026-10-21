@@ -482,15 +482,20 @@ def on_receive(packet, interface):
             values.update(get_field_values(air_quality_metrics, AIR_QUALITY_FIELDS))
             values.update(decode_soil_water_metrics(decoded.get("payload")))
 
-            # Unpack the 28-byte custom temperature array into individual columns.
+            # The minimum signed int16 marks an unavailable probe without shifting sensor indices.
             if temp_string_metrics and "temperatures" in temp_string_metrics:
                 raw_bytes = temp_string_metrics.get("temperatures")
-                if raw_bytes:
-                    for i in range(0, min(len(raw_bytes), 28), 2):
-                        sensor_idx = i // 2
-                        val_int = int.from_bytes(raw_bytes[i:i+2], byteorder='little', signed=True)
-                        values[f"water_temp_{sensor_idx}"] = val_int / 16
-                    print(f" -> [CUSTOM TEMP STRING DECODED] 14 Sensors parsed successfully.")
+                valid_count = 0
+                for sensor_idx in range(14):
+                    offset = sensor_idx * 2
+                    column = f"water_temp_{sensor_idx}"
+                    if raw_bytes and offset + 2 <= len(raw_bytes):
+                        val_int = int.from_bytes(raw_bytes[offset:offset + 2], byteorder='little', signed=True)
+                        values[column] = None if val_int == -32768 else val_int / 16
+                        valid_count += val_int != -32768
+                    else:
+                        values[column] = None
+                print(f" -> [CUSTOM TEMP STRING DECODED] {valid_count}/14 sensors valid.")
 
             temp = values.pop("temperature", None)
             if temp is not None:
