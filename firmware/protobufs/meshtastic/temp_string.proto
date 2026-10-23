@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package meshtastic;
+
+option csharp_namespace = "Meshtastic.Protobufs";
+option go_package = "github.com/meshtastic/go/generated";
+option java_outer_classname = "TempStringProtos";
+option java_package = "org.meshtastic.proto";
+option swift_prefix = "";
+
+message TempStringMetrics {
+  /*
+   * Seconds since 1970 - or 0 for unknown/unset
+   */
+  fixed32 time = 1;
+
+  /*
+   * Temperature array from DS18B20
+   */
+  bytes temperatures = 2;
+}

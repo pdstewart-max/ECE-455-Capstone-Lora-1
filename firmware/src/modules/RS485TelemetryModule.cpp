@@ -3,6 +3,7 @@
 #if defined(RAK11310)
 
 #include "modules/RS485TelemetryModule.h"
+#include "mesh/generated/meshtastic/temp_string.pb.h"
 
 #include "MeshService.h"
 #include "Router.h"
@@ -330,18 +331,74 @@ bool RS485TelemetryModule::readSEN0657(meshtastic_EnvironmentMetrics &weatherMet
     return true;
 }
 
+void packetDebugLog(const meshtastic_MeshPacket *packet, const char *logPrefix = "")
+{
+    LOG_DEBUG("%s Packet ID: 0x%08x", logPrefix, packet->id);
+    LOG_DEBUG("%s Packet Size: 0x%08x", logPrefix, packet->decoded.payload.size);
+    // PRINT PAYLOAD BYTES IN HEX
+    char hexBuffer[128] = {0};
+    int offset = 0;
+    for (size_t i = 0; i < packet->decoded.payload.size; i++) {
+        offset += snprintf(hexBuffer + offset, sizeof(hexBuffer) - offset, "%02x ", packet->decoded.payload.bytes[i]);
+    }
+    LOG_INFO("%s Payload bytes: %s", logPrefix, hexBuffer);
+}
+
 // Send telemetry data to the mesh network
 bool RS485TelemetryModule::sendTelemetry(const meshtastic_Telemetry &telemetry)
 {
     meshtastic_MeshPacket *packet = allocDataProtobuf(telemetry);
-    if (!packet)
-        return false;
+    if (!packet) return false;
+
+    packetDebugLog(packet, "[sendTelemetry]");
 
     packet->to = NODENUM_BROADCAST;
     packet->decoded.want_response = false;
     packet->priority = meshtastic_MeshPacket_Priority_BACKGROUND;
     service->sendToMesh(packet, RX_SRC_LOCAL, true);
     return true;
+}
+
+bool RS485TelemetryModule::sendTempStringMessage(int16_t* tempBuffer, size_t sensorCount) { // tempBuffer max size is 2*DS18B20_SENSOR_COUNT
+    // 1. Allocate a standard packet using the router
+    meshtastic_MeshPacket *packet = router->allocForSending();
+    if (!packet) return false;
+
+    // 2. Set your private app port number (range 256-511)
+    packet->decoded.portnum = meshtastic_PortNum_PRIVATE_APP; 
+    
+    // 3. Populate your custom message struct
+    meshtastic_TempStringMetrics temp_string_metrics = meshtastic_TempStringMetrics_init_zero;
+    temp_string_metrics.time = getTime();
+
+    size_t dataSize = sensorCount * sizeof(int16_t);
+    temp_string_metrics.temperatures.size = dataSize;
+    memcpy(temp_string_metrics.temperatures.bytes, tempBuffer, dataSize);
+
+    // 4. Encode into the packet payload buffer using Nanopb
+    pb_ostream_t stream = pb_ostream_from_buffer(
+        packet->decoded.payload.bytes, 
+        sizeof(packet->decoded.payload.bytes)
+    );
+    
+    if (pb_encode(&stream, meshtastic_TempStringMetrics_fields, &temp_string_metrics)) {
+        packet->decoded.payload.size = stream.bytes_written;
+        
+        // 5. Configure routing and send to the mesh
+        packet->to = NODENUM_BROADCAST;
+        packet->decoded.want_response = false;
+        packet->priority = meshtastic_MeshPacket_Priority_BACKGROUND;
+        
+        packetDebugLog(packet, "[sendTempStringMessage]");
+
+        service->sendToMesh(packet, RX_SRC_LOCAL, true);
+
+        return true;
+    } else {
+        // Handle encode error by releasing the packet back to the pool
+        packetPool.release(packet);
+        return false;
+    }
 }
 
 // Handle received telemetry messages (not used in this module)
@@ -406,12 +463,7 @@ int32_t RS485TelemetryModule::runOnce()
         for (int i = 0; i < DS18B20_SENSOR_COUNT; i++) {
             tempBuffer[i] = static_cast<int16_t>(temps[i] * 16.0f); // -127 becomes -2032
         }
-        meshtastic_Telemetry dsTelemetry = meshtastic_Telemetry_init_zero;
-        dsTelemetry.time = getTime();
-        dsTelemetry.which_variant = meshtastic_Telemetry_temp_string_metrics_tag;
-        dsTelemetry.variant.temp_string_metrics.temperatures.size = sizeof(tempBuffer);
-        std::memcpy(dsTelemetry.variant.temp_string_metrics.temperatures.bytes, tempBuffer, sizeof(tempBuffer));
-        sendTelemetry(dsTelemetry);
+        sendTempStringMessage(tempBuffer, DS18B20_SENSOR_COUNT);
     }
 
     digitalWrite(RS485_SENSOR_POWER_PIN, RS485_SENSOR_POWER_OFF);

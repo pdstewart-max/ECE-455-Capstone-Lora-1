@@ -6,8 +6,6 @@
 *EnvironmentMetrics.soil_moisture int_size:8
 *EnvironmentMetrics.one_wire_temperature type:FT_IGNORE
 
-*TempStringMetrics.temperatures max_size:28
-
 *LocalStats.num_online_nodes int_size:16
 *LocalStats.num_total_nodes int_size:16
 *LocalStats.num_tx_dropped int_size:16

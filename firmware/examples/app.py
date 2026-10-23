@@ -31,6 +31,8 @@ import meshtastic
 import meshtastic.serial_interface
 from flask import Flask, jsonify, render_template_string, redirect, request, url_for
 
+from meshtastic_custom import temp_string_pb2
+
 # -------------------------------------------------------------------
 # CONFIGURATION
 # -------------------------------------------------------------------
@@ -472,7 +474,6 @@ def on_receive(packet, interface):
             soil_water_metrics = get_variant(telemetry, "soil_water_metrics")
             power_metrics = get_variant(telemetry, "power_metrics")
             air_quality_metrics = get_variant(telemetry, "air_quality_metrics")
-            temp_string_metrics = get_variant(telemetry, "temp_string_metrics")
             values = get_field_values(device_metrics, DEVICE_FIELDS)
             values.update(get_field_values(
                 environment_metrics, ENVIRONMENT_FIELDS, {"environment_voltage": "voltage"}
@@ -481,16 +482,6 @@ def on_receive(packet, interface):
             values.update(get_field_values(power_metrics, POWER_FIELDS))
             values.update(get_field_values(air_quality_metrics, AIR_QUALITY_FIELDS))
             values.update(decode_soil_water_metrics(decoded.get("payload")))
-
-            # Unpack the 28-byte custom temperature array into individual columns.
-            if temp_string_metrics and "temperatures" in temp_string_metrics:
-                raw_bytes = temp_string_metrics.get("temperatures")
-                if raw_bytes:
-                    for i in range(0, min(len(raw_bytes), 28), 2):
-                        sensor_idx = i // 2
-                        val_int = int.from_bytes(raw_bytes[i:i+2], byteorder='little', signed=True)
-                        values[f"water_temp_{sensor_idx}"] = val_int / 16
-                    print(f" -> [CUSTOM TEMP STRING DECODED] 14 Sensors parsed successfully.")
 
             temp = values.pop("temperature", None)
             if temp is not None:
@@ -514,6 +505,43 @@ def on_receive(packet, interface):
                 )
                 print(f" -> [SAVED TELEMETRY] Node {from_id} | {values}")
 
+        elif portnum == "PRIVATE_APP":
+            raw_payload = decoded.get("payload", b"")
+
+            print(f"\n==========================================")
+            print(f"[RAW TEMP STRING DECODED] From Node {from_id}:")
+            print(json.dumps(json_safe(decoded), indent=2))
+            print("unserializable payload bytes:", raw_payload)
+            print(f"==========================================")
+
+            values = {}
+            if raw_payload:
+                metrics = temp_string_pb2.TempStringMetrics()
+                metrics.ParseFromString(raw_payload)
+                timestamp = metrics.time
+                raw_temp_bytes = metrics.temperatures # int16_t little endian bitewise
+
+                for i in range(0, min(len(raw_temp_bytes), 28), 2):
+                    sensor_idx = i // 2
+                    val_int = int.from_bytes(raw_temp_bytes[i:i+2], byteorder='little', signed=True)
+                    values[f"water_temp_{sensor_idx}"] = val_int / 16.0
+                print(f" -> [PRIVATE TEMP] Time: {timestamp} | Unpacked {len(raw_temp_bytes) // 2} sensors")
+
+            if values:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO nodes (node_id, node_name) VALUES (?, ?)",
+                    (from_id, node_name),
+                )
+                cursor.execute("INSERT INTO telemetry (node_id) VALUES (?)", (from_id,))
+                row_id = cursor.lastrowid
+                columns = list(values)
+                assignments = ", ".join(f"{column} = ?" for column in columns)
+                cursor.execute(
+                    f"UPDATE telemetry SET {assignments} WHERE id = ?",
+                    [values[column] for column in columns] + [row_id],
+                )
+                print(f" -> [SAVED TEMP STRING] Node {from_id} | {values}")
+
         conn.commit()
 
     except Exception as e:
@@ -528,7 +556,7 @@ def start_meshtastic():
     try:
         port_description = SERIAL_PORT or "the auto-detected port"
         print(f"Connecting to USB Base Node on {port_description}...")
-        serial_interface = meshtastic.serial_interface.SerialInterface(devPath=SERIAL_PORT)
+        serial_interface = meshtastic.serial_interface.SerialInterface(devPath="COM6")
         if not serial_interface.devPath:
             raise RuntimeError("No Meshtastic serial device was detected.")
         sync_known_nodes(serial_interface)
