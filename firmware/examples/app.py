@@ -36,7 +36,8 @@ from meshtastic_custom import temp_string_pb2
 # -------------------------------------------------------------------
 # CONFIGURATION
 # -------------------------------------------------------------------
-SERIAL_PORT = os.environ.get("MESHTASTIC_SERIAL_PORT")
+# SERIAL_PORT = os.environ.get("MESHTASTIC_SERIAL_PORT")
+SERIAL_PORT = "COM6"
 DB_FILE = os.environ.get("WATER_MONITOR_DB", "water_monitor.db")
 
 METRIC_FIELDS = [
@@ -556,7 +557,7 @@ def start_meshtastic():
     try:
         port_description = SERIAL_PORT or "the auto-detected port"
         print(f"Connecting to USB Base Node on {port_description}...")
-        serial_interface = meshtastic.serial_interface.SerialInterface(devPath="COM6")
+        serial_interface = meshtastic.serial_interface.SerialInterface(devPath=SERIAL_PORT)
         if not serial_interface.devPath:
             raise RuntimeError("No Meshtastic serial device was detected.")
         sync_known_nodes(serial_interface)

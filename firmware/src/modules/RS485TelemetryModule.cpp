@@ -29,6 +29,7 @@ constexpr uint8_t Y4000_SLAVE_ID = 1;
 constexpr uint8_t SEN0657_SLAVE_ID = 2;
 constexpr uint16_t MODBUS_READ_HOLDING_REGISTERS = 0x03;
 constexpr uint16_t MODBUS_WRITE_HOLDING_REGISTERS = 0x06;
+constexpr size_t LORA_TEST_TEMP_SENSOR_COUNT = 14;
 // Bound blocking time on the cooperative mesh loop if a sensor or cable is absent.
 constexpr uint32_t MODBUS_RESPONSE_TIMEOUT_MS = 500;
 static_assert(RS485_SENSOR_WARMUP_MS <= RS485_SENSOR_POWER_ON_DURATION_MS,
@@ -42,6 +43,9 @@ RS485TelemetryModule::RS485TelemetryModule()
     : concurrency::OSThread("RS485Telemetry"),
       ProtobufModule("RS485Telemetry", meshtastic_PortNum_TELEMETRY_APP, &meshtastic_Telemetry_msg)
 {
+#if RAK11310_LORA_TEST_MODE
+    LOG_WARN("LoRa telemetry test mode enabled; external sensor polling is disabled");
+#else
     pinMode(RS485_SENSOR_POWER_PIN, OUTPUT);
     digitalWrite(RS485_SENSOR_POWER_PIN, RS485_SENSOR_POWER_OFF);
 
@@ -54,6 +58,7 @@ RS485TelemetryModule::RS485TelemetryModule()
     DriverDS18B20::init();
 
     LOG_INFO("RS485 transport=ArduinoRS485 UART=Serial1 TX=0 RX=1 DE=6 RE=-1");
+#endif
     setIntervalFromNow(RS485_SENSOR_INITIAL_DELAY_MS);
 }
 
@@ -402,13 +407,93 @@ bool RS485TelemetryModule::sendTempStringMessage(int16_t* tempBuffer, size_t sen
 }
 
 // Handle received telemetry messages (not used in this module)
-bool RS485TelemetryModule::handleReceivedProtobuf(const meshtastic_MeshPacket &, meshtastic_Telemetry *)
+bool RS485TelemetryModule::handleReceivedProtobuf(const meshtastic_MeshPacket &packet, meshtastic_Telemetry *telemetry)
 {
+#if RAK11310_LORA_TEST_MODE
+    if (packet.from != 0) {
+        LOG_INFO("LoRa telemetry RX from !%08x variant=%u", static_cast<unsigned>(packet.from),
+                 static_cast<unsigned>(telemetry->which_variant));
+        if (telemetry->which_variant == meshtastic_Telemetry_environment_metrics_tag) {
+            const auto &metrics = telemetry->variant.environment_metrics;
+            if (metrics.has_temperature && metrics.temperature == 42.0f && metrics.has_relative_humidity &&
+                metrics.relative_humidity == 42.0f && metrics.has_barometric_pressure &&
+                metrics.barometric_pressure == 4242.0f) {
+                LOG_INFO("LoRa test sample received from !%08x: temp=%.1f C humidity=%.1f%% pressure=%.1f hPa",
+                         static_cast<unsigned>(packet.from), metrics.temperature, metrics.relative_humidity,
+                         metrics.barometric_pressure);
+            }
+        } else if (telemetry->which_variant == meshtastic_Telemetry_temp_string_metrics_tag) {
+            const auto &temperatures = telemetry->variant.temp_string_metrics.temperatures;
+            if (temperatures.size != LORA_TEST_TEMP_SENSOR_COUNT * sizeof(int16_t)) {
+                LOG_WARN("LoRa test temperature string from !%08x has %u bytes; expected %u",
+                         static_cast<unsigned>(packet.from), static_cast<unsigned>(temperatures.size),
+                         static_cast<unsigned>(LORA_TEST_TEMP_SENSOR_COUNT * sizeof(int16_t)));
+            } else {
+                const auto *bytes = temperatures.bytes;
+                const int16_t first = static_cast<int16_t>(static_cast<uint16_t>(bytes[0]) |
+                                                           (static_cast<uint16_t>(bytes[1]) << 8));
+                const size_t lastOffset = (LORA_TEST_TEMP_SENSOR_COUNT - 1) * sizeof(int16_t);
+                const int16_t last = static_cast<int16_t>(static_cast<uint16_t>(bytes[lastOffset]) |
+                                                          (static_cast<uint16_t>(bytes[lastOffset + 1]) << 8));
+                if (first == 10 * 16 && last == 23 * 16) {
+                    LOG_INFO("LoRa test temperature string received from !%08x: %u sensors, first=%.2f C last=%.2f C",
+                             static_cast<unsigned>(packet.from), static_cast<unsigned>(LORA_TEST_TEMP_SENSOR_COUNT),
+                             first / 16.0f, last / 16.0f);
+                } else {
+                    LOG_WARN("LoRa test temperature string from !%08x has unexpected values: first=%d last=%d",
+                             static_cast<unsigned>(packet.from), static_cast<int>(first), static_cast<int>(last));
+                }
+            }
+        }
+    }
+#else
+    (void)packet;
+    (void)telemetry;
+#endif
     return false;
 }
 
 int32_t RS485TelemetryModule::runOnce()
 {
+#if RAK11310_LORA_TEST_MODE
+    meshtastic_Telemetry telemetry = meshtastic_Telemetry_init_zero;
+    telemetry.time = getTime();
+    telemetry.which_variant = meshtastic_Telemetry_environment_metrics_tag;
+    telemetry.variant.environment_metrics.has_temperature = true;
+    telemetry.variant.environment_metrics.temperature = 42.0f;
+    telemetry.variant.environment_metrics.has_relative_humidity = true;
+    telemetry.variant.environment_metrics.relative_humidity = 42.0f;
+    telemetry.variant.environment_metrics.has_barometric_pressure = true;
+    telemetry.variant.environment_metrics.barometric_pressure = 4242.0f;
+    if (sendTelemetry(telemetry)) {
+        LOG_INFO("LoRa test telemetry TX from !%08x: temp=42.0 C humidity=42.0%% pressure=4242.0 hPa",
+                 static_cast<unsigned>(nodeDB->getNodeNum()));
+    } else {
+        LOG_ERROR("Failed to allocate LoRa test telemetry packet");
+    }
+
+    uint8_t temperatureBytes[LORA_TEST_TEMP_SENSOR_COUNT * sizeof(int16_t)];
+    for (size_t i = 0; i < LORA_TEST_TEMP_SENSOR_COUNT; i++) {
+        const int16_t temperature = static_cast<int16_t>((10 + i) * 16);
+        const uint16_t encoded = static_cast<uint16_t>(temperature);
+        temperatureBytes[i * 2] = static_cast<uint8_t>(encoded);
+        temperatureBytes[i * 2 + 1] = static_cast<uint8_t>(encoded >> 8);
+    }
+
+    meshtastic_Telemetry temperatureTelemetry = meshtastic_Telemetry_init_zero;
+    temperatureTelemetry.time = telemetry.time;
+    temperatureTelemetry.which_variant = meshtastic_Telemetry_temp_string_metrics_tag;
+    temperatureTelemetry.variant.temp_string_metrics.temperatures.size = sizeof(temperatureBytes);
+    std::memcpy(temperatureTelemetry.variant.temp_string_metrics.temperatures.bytes, temperatureBytes,
+                sizeof(temperatureBytes));
+    if (sendTelemetry(temperatureTelemetry)) {
+        LOG_INFO("LoRa test temperature string TX from !%08x: 14 sensors, 10.00 C to 23.00 C",
+                 static_cast<unsigned>(nodeDB->getNodeNum()));
+    } else {
+        LOG_ERROR("Failed to allocate LoRa test temperature string packet");
+    }
+    return RAK11310_LORA_TEST_INTERVAL_MS;
+#else
     if (!sensorPowerOn) {
         digitalWrite(RS485_SENSOR_POWER_PIN, RS485_SENSOR_POWER_ON);
         sensorPowerOn = true;
@@ -449,27 +534,30 @@ int32_t RS485TelemetryModule::runOnce()
         } else {
             LOG_WARN("SEN0657 Modbus read failed");
         }
+
+        float temps[DS18B20_SENSOR_COUNT];
+        if (DriverDS18B20::readAllTemperatures(temps)) {
+            int16_t tempBuffer[DS18B20_SENSOR_COUNT];
+            for (int i = 0; i < DS18B20_SENSOR_COUNT; i++) {
+                tempBuffer[i] = static_cast<int16_t>(temps[i] * 16.0f); // -127 becomes -2032
+            }
+            sendTempStringMessage(tempBuffer, DS18B20_SENSOR_COUNT);
+        }
+
         sensorReadComplete = true;
     }
 
     if (!Throttle::hasElapsed(sensorPowerStartedAtMs, RS485_SENSOR_POWER_ON_DURATION_MS)) {
         const uint32_t elapsedMs = Time::getMillis() - sensorPowerStartedAtMs;
+        // delay until the configured power-on duration has elapsed, then turn off the sensor rail
         return RS485_SENSOR_POWER_ON_DURATION_MS - elapsedMs;
-    }
-
-    float temps[DS18B20_SENSOR_COUNT];
-    if (DriverDS18B20::readAllTemperatures(temps)) {
-        int16_t tempBuffer[DS18B20_SENSOR_COUNT];
-        for (int i = 0; i < DS18B20_SENSOR_COUNT; i++) {
-            tempBuffer[i] = static_cast<int16_t>(temps[i] * 16.0f); // -127 becomes -2032
-        }
-        sendTempStringMessage(tempBuffer, DS18B20_SENSOR_COUNT);
     }
 
     digitalWrite(RS485_SENSOR_POWER_PIN, RS485_SENSOR_POWER_OFF);
     sensorPowerOn = false;
     LOG_DEBUG("External sensor rail disabled");
     return RS485_SENSOR_POWER_OFF_DURATION_MS;
+#endif
 }
 
 RS485TelemetryModule *rs485TelemetryModule;

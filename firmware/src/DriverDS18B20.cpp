@@ -4,6 +4,16 @@
 
 #include "DriverDS18B20.h"
 
+#include <cmath>
+
+namespace
+{
+bool isValidTemperature(float temperature)
+{
+    return temperature != DEVICE_DISCONNECTED_C && std::isfinite(temperature) && temperature >= -55.0f && temperature <= 125.0f;
+}
+} // namespace
+
 const DeviceAddress DriverDS18B20::ECE455_DS18B20_ADDRESSES[] = {
     {0x28, 0x32, 0x2B, 0xFD, 0x0A, 0x00, 0x00, 0x93}, // 0 - bottom / end
     {0x28, 0x28, 0xDF, 0xBD, 0x0B, 0x00, 0x00, 0xF5}, // 1
@@ -29,6 +39,11 @@ void DriverDS18B20::init() {
 }
 
 float DriverDS18B20::readOneTemperature(size_t idx, bool controlPower) {
+    if (idx >= DS18B20_SENSOR_COUNT) {
+        LOG_ERROR("DS18B20 sensor index out of range: %zu", idx);
+        return DEVICE_DISCONNECTED_C;
+    }
+
     if (controlPower) {
         // 1. Enable switched 3.3V power rail (3V3_S)
         pinMode(WB_IO2, OUTPUT);
@@ -44,14 +59,20 @@ float DriverDS18B20::readOneTemperature(size_t idx, bool controlPower) {
     // 4. Cut power to 3V3_S to minimize idle current drain
     if (controlPower) digitalWrite(WB_IO2, LOW);
 
-    // 5. Validate reading (DallasTemperature returns -127.0 on error)
-    if (tempC == DEVICE_DISCONNECTED_C) return -127.0f;
+    if (!isValidTemperature(tempC)) {
+        LOG_WARN("DS18B20 %zu temperature reading invalid: %.2f C", idx, tempC);
+        return DEVICE_DISCONNECTED_C;
+    }
 
     return tempC;
 }
 
-// Always returns true right now
 bool DriverDS18B20::readAllTemperatures(float* temps, bool controlPower) {
+    if (temps == nullptr) {
+        LOG_ERROR("DS18B20 temperature output buffer is null");
+        return false;
+    }
+
     if (controlPower) {
         // 1. Enable switched 3.3V power rail (3V3_S)
         pinMode(WB_IO2, OUTPUT);
@@ -61,19 +82,32 @@ bool DriverDS18B20::readAllTemperatures(float* temps, bool controlPower) {
     }
 
     sensors.requestTemperatures();
+    size_t validCount = 0;
     for (size_t i = 0; i < DS18B20_SENSOR_COUNT; i++) {
         delay(40);
         float tempC = sensors.getTempC(ECE455_DS18B20_ADDRESSES[i]);
-        LOG_INFO("DS18B20 %zu Temperature: %.2f C", i, tempC);
 
-        // 5. Validate reading (DallasTemperature returns -127.0 on error)
-        if (tempC == DEVICE_DISCONNECTED_C) LOG_WARN("DS18B20 %zu Temperature reading failed (disconnected)", i);
+        if (!isValidTemperature(tempC)) {
+            LOG_WARN("DS18B20 %zu temperature reading invalid: %.2f C", i, tempC);
+            temps[i] = DEVICE_DISCONNECTED_C;
+            continue;
+        }
+
+        LOG_INFO("DS18B20 %zu Temperature: %.2f C", i, tempC);
         temps[i] = tempC;
+        validCount++;
     }
 
-    // 4. Cut power to 3V3_S to minimize idle current drain
     if (controlPower) digitalWrite(WB_IO2, LOW);
 
+    if (validCount == 0) {
+        LOG_ERROR("DS18B20 temperature string has no valid readings");
+        return false;
+    }
+    if (validCount != DS18B20_SENSOR_COUNT) {
+        LOG_WARN("DS18B20 temperature string partial: %u/%u readings valid",
+                 static_cast<unsigned>(validCount), static_cast<unsigned>(DS18B20_SENSOR_COUNT));
+    }
     return true;
 }
 
