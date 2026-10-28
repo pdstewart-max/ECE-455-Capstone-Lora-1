@@ -60,15 +60,15 @@ Omit `--port COM5` if PlatformIO can select the correct serial device automatica
 
 Edit `variants/rp2040/rak11310/variant.h` for board-specific compile-time settings. After changing a setting, rebuild and reflash the firmware; these values are not runtime settings.
 
-| Setting | Current value | Effect |
-| --- | --- | --- |
+| Setting | Effect |
+| --- | --- |
 | `USERPREFS_CONFIG_DEVICE_TELEM_UPDATE_INTERVAL` | Interval for Meshtastic's built-in **device metrics** broadcast (such as battery/device status). This is separate from the water logger's sensor cycle. |
 | `RS485_SENSOR_WARMUP_MS` | Delay after powering the external sensor rail before polling the RS485 sensors. Increase only if a sensor's documentation or measurements show it needs more startup time. |
 | `RS485_SENSOR_POWER_ON_DURATION_MS` | How long the external sensor rail stays on for the RS485 measurements and DS18B20 read. It must be at least as long as the warmup period. |
 | `RS485_SENSOR_POWER_OFF_DURATION_MS` |  Delay after a sensor read before the next sampling/transmission cycle. Set this to `30UL * 60UL * 1000UL` for a 30-minute field cycle. The Meshtastic node and radio remain running to forward mesh traffic. |
 | `RS485_SENSOR_INITIAL_DELAY_MS` | Delay before the first sensor cycle after startup, allowing the mesh stack to initialize. |
-| `RS485_SENSOR_POWER_PIN` | `WB_IO6` | GPIO controlling the external sensor rail. Keep this separate from `PIN_GPS_EN` (`WB_IO2`) so sensor power switching does not disable the GNSS module. |
-| `PIN_GPS_EN` | `WB_IO2` | GPS power-enable rail used by the RAK12501 integration. |
+| `RS485_SENSOR_POWER_PIN` |  GPIO controlling the external sensor rail. Keep this separate from `PIN_GPS_EN` (`WB_IO2`) so sensor power switching does not disable the GNSS module. |
+| `PIN_GPS_EN` | GPS power-enable rail used by the RAK12501 integration. |
 | `RAK11310_LORA_TEST_MODE` | Synthetic telemetry test switch. Leave disabled for production. The dedicated `rak11310-lora-test` build environment enables it without editing the default environment. |
 | `RAK11310_LORA_TEST_INTERVAL_MS` | Period between synthetic LoRa test broadcasts when test mode is enabled. |
 
