@@ -353,6 +353,33 @@ bool RS485TelemetryModule::sendTelemetry(const meshtastic_Telemetry &telemetry)
 
 bool RS485TelemetryModule::handleReceivedProtobuf(const meshtastic_MeshPacket &packet, meshtastic_Telemetry *telemetry)
 {
+    if (telemetry->which_variant == meshtastic_Telemetry_temp_string_metrics_tag) {
+        const auto &temperatures = telemetry->variant.temp_string_metrics.temperatures;
+        const size_t size = temperatures.size;
+        if (size > sizeof(temperatures.bytes) || size % sizeof(int16_t) != 0) {
+            LOG_WARN("Temperature string from !%08x has invalid size %u", static_cast<unsigned>(packet.from),
+                     static_cast<unsigned>(size));
+        } else {
+            const size_t sensorCount = size / sizeof(int16_t);
+            LOG_INFO("Temperature string received from !%08x: %u sensor readings", static_cast<unsigned>(packet.from),
+                     static_cast<unsigned>(sensorCount));
+            for (size_t sensorIdx = 0; sensorIdx < sensorCount; sensorIdx++) {
+                const size_t offset = sensorIdx * sizeof(int16_t);
+                const uint16_t encoded = static_cast<uint16_t>(temperatures.bytes[offset]) |
+                                         (static_cast<uint16_t>(temperatures.bytes[offset + 1]) << 8);
+                const int32_t temperature =
+                    encoded <= static_cast<uint16_t>(std::numeric_limits<int16_t>::max())
+                        ? encoded
+                        : static_cast<int32_t>(encoded) - 0x10000;
+                if (temperature == INVALID_TEMPERATURE) {
+                    LOG_INFO("DS18B20 %u: unavailable", static_cast<unsigned>(sensorIdx));
+                } else {
+                    LOG_INFO("DS18B20 %u: %.2f C", static_cast<unsigned>(sensorIdx), temperature / 16.0f);
+                }
+            }
+        }
+    }
+
 #if RAK11310_LORA_TEST_MODE
     if (packet.from != 0) {
         LOG_INFO("LoRa telemetry RX from !%08x variant=%u", static_cast<unsigned>(packet.from),
